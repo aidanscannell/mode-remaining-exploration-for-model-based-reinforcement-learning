@@ -37,6 +37,73 @@ DEFAULT_DYNAMICS_FIT_KWARGS = {
 }
 
 
+def mode_opt_loop(
+    start_state: ttf.Tensor2[Batch, StateDim],
+    target_state: ttf.Tensor2[Batch, StateDim],
+    dynamics: ModeOptDynamics,
+    mode_controller: Controller,
+    env_name: Optional[str] = None,
+    explorative_controller: Controller = None,
+    dataset: Dataset = None,
+    desired_mode: int = 1,
+    mode_satisfaction_probability: float = 0.7,  # Mode satisfaction probability (0, 1]
+    learning_rate: float = 0.01,
+    epsilon: float = 1e-8,
+    save_freq: Optional[Union[str, int]] = None,
+    log_dir: str = "./",
+    dynamics_fit_kwargs: dict = DEFAULT_DYNAMICS_FIT_KWARGS,
+    max_to_keep: int = None,
+    num_explorative_trajectories: int = 6,
+):
+    at_target_state = False
+    while not at_target_state:
+
+        opt_result = explorative_controller.optimise(explorative_controller_callback)
+        X, Y = [], []
+        for i in range(num_explorative_trajectories):
+            if isinstance(start_state, tf.Tensor):
+                start_state = start_state.numpy()
+            X_, Y_ = collect_data_from_env(
+                env=env,
+                start_state=start_state,
+                controls=explorative_controller(),
+            )
+            X.append(X_)
+            Y.append(Y_)
+        np.concatenate(X, 0), np.concatenate(Y, 0)
+
+        # new_data = self.explore_env()
+        self.update_dataset(new_data=new_data)
+        self.optimise_dynamics()
+        (trajectory, at_target_state) = self.find_trajectory_to_target()
+        if at_target_state:
+            in_desired_mode = self.check_mode_remaining(trajectory)
+            if in_desired_mode:
+                print("Found delta mode remaining trajectory to target state")
+                return True
+            else:
+                at_target_state = False
+
+    print("opt_result['success']")
+    print(opt_result["success"])
+    if not opt_result["success"]:
+        raise NotImplementedError
+        # explorative_controller.reset()
+        # return explore_env()
+
+
+def update_dataset(new_dataset: Dataset, dataset: Dataset = None):
+    if dataset is not None:
+        Xold, Yold = dataset
+        Xnew, Ynew = new_dataset
+        X = np.concatenate([Xold, Xnew], 0)
+        Y = np.concatenate([Yold, Ynew], 0)
+        dataset = (X, Y)
+    else:
+        dataset = new_data
+    return dataset
+
+
 class ModeOpt(tf.Module):
     def __init__(
         self,
